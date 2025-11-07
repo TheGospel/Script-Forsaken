@@ -1,192 +1,61 @@
 print("Script inicializado by Gospel")
-local Adapter = {
-    on_key_down = function(key, cb)
-        local running = true
-        task.spawn(function()
-            while running do
-                if _G.__key_state and _G.__key_state[key] == true then
-                    cb()
-                    task.wait(0.15)
-                end
-                task.wait(0.02)
-            end
-        end)
-        return function() running = false end
-    end,
-    mouse_move_abs = function(x, y)
-        if typeof(mousemoveabs) == "function" then
-            mousemoveabs(x, y)
-        elseif _G.mousemoveabs then
-            _G.mousemoveabs(x, y)
+
+local function call_space_action()
+    if type(_G.Gospel_OnSpace) == "function" then
+        _G.Gospel_OnSpace()
+        return
+    end
+    if type(main) == "function" then
+        main()
+        return
+    end
+    if type(Solve) == "function" then
+        Solve()
+        return
+    end
+end
+
+local function bind_space_roblox()
+    local UIS = game:GetService("UserInputService")
+    local locked = false
+    local function fire_once()
+        if locked then return end
+        locked = true
+        local ok, err = pcall(call_space_action)
+        if not ok then warn("Gospel space action error: ", err) end
+        task.delay(0.2, function() locked = false end)
+    end
+    local conn = UIS.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.KeyCode == Enum.KeyCode.Space then
+            fire_once()
         end
-    end,
-    sleep = function(sec) task.wait(sec) end,
-}
-local GridUtils = {}
-function GridUtils.detect_grid_size(Grid)
-    local rows, cols = 0, 0
-    for _, child in ipairs(Grid:GetChildren()) do
-        if typeof(child.Name) == "string" then
-            local r, c = child.Name:match("^(%d+)%-(%d+)$")
-            if r then
-                rows = math.max(rows, tonumber(r))
-                cols = math.max(cols, tonumber(c))
-            end
-        end
-    end
-    rows = rows > 0 and rows or 6
-    cols = cols > 0 and cols or 6
-    return rows, cols
-end
-function GridUtils.parse_grid(Grid)
-    local rows, cols = GridUtils.detect_grid_size(Grid)
-    local cells = {}
-    for r = 1, rows do cells[r] = {} end
-    for _, child in ipairs(Grid:GetChildren()) do
-        local r, c = child.Name:match("^(%d+)%-(%d+)$")
-        if r then
-            r, c = tonumber(r), tonumber(c)
-            local pos = child.AbsolutePosition or Vector2.zero
-            local siz = child.AbsoluteSize or Vector2.new(0,0)
-            local center = Vector2.new(pos.X + siz.X * 0.5, pos.Y + siz.Y * 0.5)
-            cells[r][c] = {
-                frame = child,
-                position = pos,
-                size = siz,
-                center = center,
-                value = 0,
-            }
-        end
-    end
-    return cells, rows, cols
-end
-local Heap = {}
-Heap.__index = Heap
-function Heap.new()
-    return setmetatable({ data = {} }, Heap)
-end
-local function swap(t, i, j) t[i], t[j] = t[j], t[i] end
-function Heap:push(node)
-    local h = self.data
-    table.insert(h, node)
-    local i = #h
-    while i > 1 do
-        local p = (i // 2)
-        if h[p].priority <= h[i].priority then break end
-        swap(h, p, i)
-        i = p
-    end
-end
-function Heap:pop()
-    local h = self.data
-    local n = #h
-    if n == 0 then return nil end
-    local root = h[1]
-    local last = h[n]
-    h[n] = nil
-    if n > 1 then
-        h[1] = last
-        local i = 1
-        while true do
-            local l, r = i * 2, i * 2 + 1
-            local m = i
-            if l <= #h and h[l].priority < h[m].priority then m = l end
-            if r <= #h and h[r].priority < h[m].priority then m = r end
-            if m == i then break end
-            swap(h, i, m)
-            i = m
-        end
-    end
-    return root
-end
-function Heap:is_empty() return #self.data == 0 end
-local Pathfinder = {}
-local function key_of(r, c) return r .. ":" .. c end
-local function reconstruct_path(parent, goalKey)
-    local path = {}
-    local k = goalKey
-    while k do
-        local r, c = k:match("^(%d+):(%d+)$")
-        table.insert(path, 1, { tonumber(r), tonumber(c) })
-        k = parent[k]
-    end
-    return path
-end
-local function manhattan(a, b)
-    return math.abs(a[1] - b[1]) + math.abs(a[2] - b[2])
-end
-function Pathfinder.astar(start_rc, goal_rc, rows, cols, is_blocked, h_func)
-    local h = Heap.new()
-    local startKey = key_of(start_rc[1], start_rc[2])
-    local goalKey  = key_of(goal_rc[1],  goal_rc[2])
-    local gScore = { [startKey] = 0 }
-    local parent = { [startKey] = nil }
-    h:push({ key = startKey, rc = start_rc, priority = 0 })
-    local DIRS = { {1,0},{-1,0},{0,1},{0,-1} }
-    h_func = h_func or manhattan
-    while not h:is_empty() do
-        local cur = h:pop()
-        if cur.key == goalKey then
-            return reconstruct_path(parent, goalKey)
-        end
-        local r, c = cur.rc[1], cur.rc[2]
-        local baseG = gScore[cur.key]
-        for i = 1, 4 do
-            local nr, nc = r + DIRS[i][1], c + DIRS[i][2]
-            if nr >= 1 and nr <= rows and nc >= 1 and nc <= cols and not is_blocked(nr, nc) then
-                local nKey = key_of(nr, nc)
-                local tentative = baseG + 1
-                if gScore[nKey] == nil or tentative < gScore[nKey] then
-                    gScore[nKey] = tentative
-                    parent[nKey] = cur.key
-                    local priority = tentative + h_func({nr, nc}, goal_rc)
-                    h:push({ key = nKey, rc = {nr, nc}, priority = priority })
-                end
-            end
-        end
-    end
-    return nil
-end
-local function lerp(a, b, t) return a + (b - a) * t end
-local function smooth_move_between(p1, p2, steps, delay)
-    local dist = math.abs(p2.X - p1.X) + math.abs(p2.Y - p1.Y)
-    steps = steps or math.clamp(math.floor(dist / 15), 3, 10)
-    delay = delay or 0.0008
-    for i = 1, steps do
-        local t = i / steps
-        local x = lerp(p1.X, p2.X, t)
-        local y = lerp(p1.Y, p2.Y, t)
-        Adapter.mouse_move_abs(x, y)
-        Adapter.sleep(delay)
-    end
-end
-local MouseFlow = {}
-function MouseFlow.draw_path(cells, path)
-    if not path or #path == 0 then return end
-    local first = cells[path[1][1]][path[1][2]].center
-    Adapter.mouse_move_abs(first.X, first.Y)
-    for i = 2, #path do
-        local r, c = path[i][1], path[i][2]
-        local toC = cells[r][c].center
-        local fromC = cells[path[i-1][1]][path[i-1][2]].center
-        smooth_move_between(fromC, toC, nil, nil)
-    end
-end
-local SpaceHotkey = {}
-function SpaceHotkey.bind(onSpace)
-    return Adapter.on_key_down("Space", function()
-        if SpaceHotkey._locked then return end
-        SpaceHotkey._locked = true
-        local ok, err = pcall(onSpace)
-        if not ok then warn("onSpace error: ", err) end
-        task.delay(0.12, function() SpaceHotkey._locked = false end)
     end)
+    return function()
+        if conn then conn:Disconnect() end
+    end
 end
-return {
-    Adapter = Adapter,
-    GridUtils = GridUtils,
-    Heap = Heap,
-    Pathfinder = Pathfinder,
-    MouseFlow = MouseFlow,
-    SpaceHotkey = SpaceHotkey,
-}
+
+local function is_roblox_env()
+    local ok = pcall(function()
+        local _ = game:GetService("UserInputService")
+    end)
+    return ok
+end
+
+function GospelBindSpace(fn)
+    if type(fn) == "function" then
+        _G.Gospel_OnSpace = fn
+    end
+    if is_roblox_env() then
+        return bind_space_roblox()
+    else
+        return function() end
+    end
+end
+
+if _G.Gospel_AutoBind ~= false then
+    GospelBindSpace()
+end
+
+return { GospelBindSpace = GospelBindSpace }
