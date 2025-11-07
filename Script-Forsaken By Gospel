@@ -1,3 +1,4 @@
+print("Script inicializado by Gospel")
 local Adapter = {
     on_key_down = function(key, cb)
         local running = true
